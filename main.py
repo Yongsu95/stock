@@ -21,6 +21,26 @@ session.headers.update({
     "Referer": "https://finance.yahoo.com/",
 })
 
+# -------------------------------------------------------------
+# [지침 1] 종목별 검증 키워드 매핑 테이블 (NER & Keyword Verification)
+# -------------------------------------------------------------
+STOCK_KEYWORDS = {
+    # 미국 주식
+    "TSLA": ["테슬라", "TSLA", "Tesla"],
+    "CPNG": ["쿠팡", "CPNG", "Coupang"],
+    "KMB": ["킴벌리", "KMB", "Kimberly"],
+    # 금 및 자산
+    "GOLD": ["금", "금값", "금시세", "Gold", "KRX금"],
+    "1659.N": ["금", "금값", "금시세", "Gold", "KRX금"],
+    "GC=F": ["금", "금값", "금시세", "Gold"],
+    # 국내 주식
+    "003670": ["포스코퓨처엠", "포스코", "퓨처엠", "POSCO"],
+    "012450": ["한화에어로스페이스", "한화에어로", "에어로스페이스"],
+    "079550": ["LIG넥스원", "LIG", "넥스원"],
+    "489790": ["한화비전", "비전"],
+    "064350": ["현대로템", "로템"],
+}
+
 
 def get_access_token():
   """카카오 액세스 토큰 발급"""
@@ -56,12 +76,7 @@ def get_access_token():
 
 def translate_to_korean(text):
   """영어 헤드라인을 한국어로 자동 번역"""
-  if (
-      not text
-      or "소식 없음" in text
-      or "오류" in text
-      or "실패" in text
-  ):
+  if not text or "개별 주요 뉴스 없음" in text or "오류" in text:
     return text
   try:
     encoded_text = urllib.parse.quote(text)
@@ -161,39 +176,36 @@ def get_naver_gold_price():
   return 0.0, 0.0
 
 
-def get_recent_yahoo_news_direct(ticker):
-  """야후 파이낸스 다이렉트 API 호출 및 번역 (yfinance 패키지 미사용으로 100% 수집)"""
+def get_recent_yahoo_news_direct(ticker, keywords):
+  """[지침 1, 2 반영] 야후 뉴스를 조회하고 키워드로 1차 검증 후 반환"""
   try:
-    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={ticker}&newsCount=5"
+    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={ticker}&newsCount=10"
     res = session.get(url, timeout=5)
     if res.status_code == 200:
       news_list = res.json().get("news", [])
-      if news_list:
-        current_time = int(time.time())
-        one_day_ago = current_time - (24 * 60 * 60)
+      current_time = int(time.time())
+      one_day_ago = current_time - (24 * 60 * 60)
 
-        for item in news_list:
-          title = item.get("title")
-          pub_time = item.get("providerPublishTime", 0)
+      # 1차 키워드 검증 (지침 1)
+      for item in news_list:
+        title = item.get("title", "")
+        pub_time = item.get("providerPublishTime", 0)
 
-          if title:
-            translated = translate_to_korean(title)
-            if pub_time >= one_day_ago:
-              return translated
-            else:
-              return f"{translated} (최근 소식)"
-
-        first_title = news_list[0].get("title", "")
-        if first_title:
-          return f"{translate_to_korean(first_title)} (최근 소식)"
+        if title and any(kw.lower() in title.lower() for kw in keywords):
+          translated = translate_to_korean(title)
+          if pub_time >= one_day_ago:
+            return translated
+          else:
+            return f"{translated} (최근 소식)"
   except Exception as e:
     print(f"야후 다이렉트 뉴스 에러 ({ticker}): {e}")
 
-  return "외신 소식 없음"
+  # 키워드 일치 뉴스 부재 시 Fallback 메시지 (지침 2)
+  return "개별 주요 뉴스 없음 (증시 전반 흐름 동반)"
 
 
-def get_naver_news(code, is_us=False):
-  """네이버 증권 최신 뉴스 수집 (국내/해외 다이렉트 URL 적용)"""
+def get_naver_news(code, is_us=False, keywords=[]):
+  """[지침 1, 2 반영] 네이버 뉴스를 조회하고 키워드로 1차 검증 후 반환"""
   try:
     if is_us:
       naver_symbol = code
@@ -206,12 +218,10 @@ def get_naver_news(code, is_us=False):
       elif code == "GC=F":
         naver_symbol = "GC=F"
 
-      # 네이버 해외주식 뉴스 API 주소
-      api_url = f"https://m.stock.naver.com/api/news/world/stock/{naver_symbol}?pageSize=5&page=1"
+      api_url = f"https://m.stock.naver.com/api/news/world/stock/{naver_symbol}?pageSize=10&page=1"
     else:
-      # 네이버 국내주식 뉴스 API 주소
       api_url = (
-          f"https://m.stock.naver.com/api/news/stock/{code}?pageSize=5&page=1"
+          f"https://m.stock.naver.com/api/news/stock/{code}?pageSize=10&page=1"
       )
 
     res = session.get(api_url, timeout=5)
@@ -223,19 +233,25 @@ def get_naver_news(code, is_us=False):
       elif isinstance(data, dict):
         items = data.get("items", data.get("newsList", []))
 
-      if items:
-        first_item = items[0]
+      # 1차 키워드 검증 (지침 1)
+      for item in items:
         title = (
-            first_item.get("tit")
-            or first_item.get("title")
-            or first_item.get("articleTitle")
-            or first_item.get("sntnc")
+            item.get("tit")
+            or item.get("title")
+            or item.get("articleTitle")
+            or item.get("sntnc")
         )
         if title:
-          return clean_html(title)
+          clean_t = clean_html(title)
+          if not keywords or any(
+              kw.lower() in clean_t.lower() for kw in keywords
+          ):
+            return clean_t
   except Exception as e:
     print(f"네이버 뉴스 수집 에러 ({code}): {e}")
-  return "최신 뉴스 없음"
+
+  # 키워드 일치 뉴스 부재 시 Fallback 메시지 (지침 2)
+  return "개별 주요 뉴스 없음 (증시 전반 흐름 동반)"
 
 
 def generate_technical_strategy(rate_5d):
@@ -280,10 +296,12 @@ def send_kakao_message(access_token, text):
 
 def process_stock_item(name, symbol_or_code, is_us=True, is_gold=False):
   """종목 종합 브리핑 생성"""
+  keywords = STOCK_KEYWORDS.get(symbol_or_code, [name])
+
   if is_us:
     cp, rate = get_yahoo_us_price(symbol_or_code)
-    yahoo_headline = get_recent_yahoo_news_direct(symbol_or_code)
-    naver_headline = get_naver_news(symbol_or_code, is_us=True)
+    yahoo_headline = get_recent_yahoo_news_direct(symbol_or_code, keywords)
+    naver_headline = get_naver_news(symbol_or_code, is_us=True, keywords=keywords)
     rate_5d = get_5d_rate(symbol_or_code)
     price_str = f"${cp:,.2f} ({rate:+,.2f}%)" if cp > 0 else "가격 수집 실패"
 
@@ -294,7 +312,7 @@ def process_stock_item(name, symbol_or_code, is_us=True, is_gold=False):
 
   elif is_gold:
     cp, rate = get_naver_gold_price()
-    naver_headline = get_naver_news("1659.N", is_us=False)
+    naver_headline = get_naver_news("1659.N", is_us=False, keywords=keywords)
     rate_5d = get_5d_rate("GC=F")
     if cp > 0:
       price_str = f"{cp:,.0f}원 (KRX금현물, {rate:+,.2f}%)"
@@ -311,7 +329,7 @@ def process_stock_item(name, symbol_or_code, is_us=True, is_gold=False):
     yahoo_code = (
         symbol_or_code + ".KS" if len(symbol_or_code) == 6 else symbol_or_code
     )
-    naver_headline = get_naver_news(symbol_or_code, is_us=False)
+    naver_headline = get_naver_news(symbol_or_code, is_us=False, keywords=keywords)
     rate_5d = get_5d_rate(yahoo_code)
     price_str = f"{cp:,.0f}원 ({rate:+,.2f}%)" if cp > 0 else "가격 수집 실패"
 
@@ -322,7 +340,10 @@ def process_stock_item(name, symbol_or_code, is_us=True, is_gold=False):
 
 
 def main():
-  print("🔄 [에이전트 가동] 야후/네이버 뉴스 다이렉트 API 수집을 시작합니다...")
+  print(
+      "🔄 [에이전트 가동] 키워드 검증 및 예외처리가 강화된 브리핑 수집을"
+      " 시작합니다..."
+  )
   today_str = datetime.now().strftime("%Y년 %m월 %d일")
 
   access_token = get_access_token()
@@ -367,7 +388,7 @@ def main():
     time.sleep(1)
   send_kakao_message(access_token, "\n".join(part4))
 
-  print("✅ 미국/국내 뉴스 완벽 수집 및 전송 성공!")
+  print("✅ 신뢰도 높은 주식 브리핑 전송 완료!")
 
 
 if __name__ == "__main__":
