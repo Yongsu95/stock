@@ -1,18 +1,54 @@
 from datetime import datetime
 import json
+import os
 import requests
 import urllib3
 import yfinance as yf
-from token_manager import get_access_token
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+def get_access_token():
+  """환경 변수(깃허브 시크릿) 또는 로컬 파일에서 토큰을 읽어
+
+  리프레시 토큰을 이용해 최신 액세스 토큰을 실시간 발급받습니다.
+  """
+  rest_api_key = None
+  refresh_token = None
+
+  if os.environ.get("REST_API_KEY") and os.environ.get("REFRESH_TOKEN"):
+    rest_api_key = os.environ.get("REST_API_KEY")
+    refresh_token = os.environ.get("REFRESH_TOKEN")
+  else:
+    try:
+      with open("kakao_tokens.json", "r") as fp:
+        tokens = json.load(fp)
+        refresh_token = tokens.get("refresh_token")
+        rest_api_key = tokens.get("rest_api_key", "본인의_REST_API_키_입력")
+    except Exception as e:
+      print(f"❌ 토큰 파일 로드 실패: {e}")
+      return None
+
+  url = "https://kauth.kakao.com/oauth/token"
+  data = {
+      "grant_type": "refresh_token",
+      "client_id": rest_api_key,
+      "refresh_token": refresh_token,
+  }
+
+  response = requests.post(url, data=data, verify=False)
+  if response.status_code == 200:
+    return response.json().get("access_token")
+  else:
+    print(f"❌ 액세스 토큰 갱신 에러: {response.status_code}")
+    print(response.json())
+    return None
 
 
 def main():
   print("🔄 [에이전트 가동] 시장 데이터와 외신 뉴스를 수집합니다...")
   today_str = datetime.now().strftime("%Y년 %m월 %d일")
 
-  # 대상 종목 및 야후 파이낸스 티커 매핑
   tickers = {
       "킴벌리클라크": "KMB",
       "테슬라": "TSLA",
@@ -27,11 +63,9 @@ def main():
 
   report = [f"📊 [{today_str} 맞춤형 인텔리전스 브리핑]\n"]
 
-  # 1. 미국 장 마감 시황 (테슬라, 쿠팡, 킴벌리클라크)
+  # 1. 미국 장 마감 시황
   report.append("🇺🇸 [미국 장 마감 시황]")
-  us_stocks = ["테슬라", "쿠팡", "킴벌리클라크"]
-
-  for name in us_stocks:
+  for name in ["테슬라", "쿠팡", "킴벌리클라크"]:
     try:
       tk = yf.Ticker(tickers[name])
       hist = tk.history(period="2d")
@@ -50,7 +84,6 @@ def main():
       else:
         price_str = "가격 정보 없음"
 
-      # 사용자 핵심 투자 전략 반영
       if name == "테슬라":
         strategy = (
             "💡 전략: 4분기 메가팩 및 FSD 모멘텀 기대\n  - ⏱ 타이밍 ▶ 오늘:"
@@ -73,18 +106,16 @@ def main():
     except Exception:
       report.append(f"• {name}: 데이터 수집 에러\n")
 
-  # 2. 국내 장 및 자산 실시간 시황 (금, 방산 4인방, 포스코퓨처엠)
+  # 2. 국내 장 및 자산 실시간 시황
   report.append("\n🇰🇷 [국내 장 실시간 시황 & 핵심 자산]")
-  kr_assets = [
+  for name in [
       "금",
       "포스코퓨처엠",
       "한화에어로스페이스",
       "LIG넥스원",
       "한화비전",
       "현대로템",
-  ]
-
-  for name in kr_assets:
+  ]:
     try:
       tk = yf.Ticker(tickers[name])
       hist = tk.history(period="2d")
@@ -107,7 +138,6 @@ def main():
       else:
         price_str = "가격 정보 없음"
 
-      # 방산 및 이차전지, 금 운용 전략 반영
       if (
           "방산" in name
           or name in ["한화에어로스페이스", "LIG넥스원", "한화비전", "현대로템"]
@@ -136,7 +166,7 @@ def main():
 
   final_text = "\n".join(report)
 
-  # 3. 신선하게 발급받은 액세스 토큰으로 카카오톡 전송
+  # 3. 카카오톡 전송
   access_token = get_access_token()
   if not access_token:
     print("❌ 유효한 액세스 토큰을 가져오지 못해 전송을 중단합니다.")
@@ -158,7 +188,7 @@ def main():
   response = requests.post(url, headers=headers, data=data, verify=False)
 
   if response.status_code == 200:
-    print("✅ [성공] 토큰 자동 갱신 및 맞춤형 브리핑 전송 완료!")
+    print("✅ [성공] 맞춤형 브리핑 전송 완료!")
   else:
     print(f"❌ 전송 실패: {response.status_code}, {response.json()}")
 
