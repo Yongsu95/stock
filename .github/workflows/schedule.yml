@@ -2,9 +2,10 @@ name: Stock & News Briefing Bot
 
 on:
   schedule:
-    # 매일 UTC 30:00 실행 (한국 시간 기준 오전 9시)
-    - cron: '00 1 * * *'
-  
+   
+    # 매일 UTC 01:00 실행 (한국 시간 기준 오전 10시 00분)
+    - cron: '0 3 * * *'
+
   # 수동 실행 버튼 활성화
   workflow_dispatch: 
 
@@ -14,12 +15,13 @@ jobs:
     
     steps:
       - name: 깃허브 코드 가져오기
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: 파이썬 환경 설정
-        uses: actions/setup-python@v4
+      - name: 파이썬 환경 설정 및 pip 캐싱
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip' # 👈 pip 패키지 캐싱 적용
 
       - name: 필수 패키지 설치
         run: |
