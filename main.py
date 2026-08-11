@@ -479,49 +479,20 @@ def get_naver_news(code, is_us=False, keywords=None):
 
 
 def generate_technical_strategy(rate_5d, rate_1mo=None):
-  """5일/1개월 누적 등락률 기반 분석.
+  """5일/1개월 누적 등락률을 있는 그대로 보여준다.
 
-  기존 코드는 5일 등락률 '하나'로 오늘/1주일/1달 문구를 전부 만들었습니다.
-  여기서는 1개월치 실측 등락률(rate_1mo)이 주어지면 '1달' 코멘트에는
-  그 값을 실제로 반영합니다. rate_1mo가 없으면 기존처럼 5일치로만 판단합니다.
+  이전 버전은 -3%/+3% 임의 기준으로 '오늘/1주일/1달' 매수·매도 타이밍
+  추천 문구를 붙였는데, 이건 검증된 전략이 아니라 임의 규칙이라 오해
+  소지가 있어 제거했습니다. 이제는 사실(fact)만 전달합니다:
+  최근 5거래일간, 그리고 최근 1개월간 각각 몇 % 움직였는지.
+  (참고: 종목 가격 옆 괄호 안 %는 전일 종가 대비 당일 등락률이라
+  이것과는 다른 숫자입니다.)
   """
   if rate_1mo is None:
     rate_1mo = rate_5d
 
-  def bucket(rate):
-    if rate <= -3.0:
-      return "oversold"
-    elif rate >= 3.0:
-      return "overheated"
-    return "sideways"
+  return f"📈 최근 등락률: 5일 {rate_5d:+,.2f}% / 1개월 {rate_1mo:+,.2f}%"
 
-  today_bucket = bucket(rate_5d)      # '오늘' 판단 기준: 최근 5일 흐름
-  week_bucket = bucket(rate_5d)       # '1주일' 판단 기준: 동일하게 최근 5일 흐름
-  month_bucket = bucket(rate_1mo)     # '1달' 판단 기준: 실제 1개월 누적 등락률
-
-  today_action = {
-      "oversold": "분할 매수 고려",
-      "overheated": "추격 매수 자제",
-      "sideways": "관망 또는 지지선 분할 접근",
-  }[today_bucket]
-
-  week_action = {
-      "oversold": "저점 매집",
-      "overheated": "일부 이익 실현 검토",
-      "sideways": "횡보 대응",
-  }[week_bucket]
-
-  month_action = {
-      "oversold": "반등 추이 관망",
-      "overheated": "홀딩",
-      "sideways": "비중 유지",
-  }[month_bucket]
-
-  return (
-      f"💡 기술적 분석: 5일 {rate_5d:+,.2f}% / 1개월 {rate_1mo:+,.2f}%\n"
-      f"  - ⏱ 타이밍 ▶ 오늘: {today_action} | 1주일: {week_action} | "
-      f"1달: {month_action}"
-  )
 
 
 def send_kakao_message(access_token, text):
